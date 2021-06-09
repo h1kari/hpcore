@@ -13,7 +13,7 @@ always @(posedge CK)
     CK2 <= !CK2;
 
 // create ring oscillator with data at f/2
-always @(posedge CK or VCC)
+always @(posedge CK)
     if (CK2 == INVERT) begin
         if(VCC == 0)
             #0.2 Data <= 0;

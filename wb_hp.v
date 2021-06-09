@@ -112,7 +112,7 @@ wire hp_Alarm;
 wire hp_vcc, hp_glitch_en;
 reg wb_hp_vcc, wb_hp_glitch_en;
 wire [1:0] hp_pn_select;
-reg [1:0] wb_pn_select;
+reg [1:0] wb_hp_pn_select;
 
 generate
     if(ENABLE_GLITCH)
@@ -143,7 +143,8 @@ hoggephase #(1) hoggephase_n (
 );
 
 // select which detectors to use...
-assign hp_Alarm = (hp_pn_select[0] & hp_Alarm_p) | (hp_pn_select[1] & hp_Alarm_n);
+assign hp_Alarm = ((hp_pn_select[0] | wb_hp_pn_select[0]) & hp_Alarm_p) |
+                  ((hp_pn_select[1] | wb_hp_pn_select[1]) & hp_Alarm_n);
     
 assign o_wb_stall = 0;
 
@@ -151,8 +152,8 @@ assign o_wb_stall = 0;
 reg hp_Alarm_latch = 0;
 wire hp_Alarm_rst;
 reg wb_hp_Alarm_rst = 0;
-wire hp_Alarm_latch_async_rst = hp_Alarm_rst | wb_hp_Alarm_rst | reset | hp_Alarm;
-always @(posedge clk or hp_Alarm_latch_async_rst)
+wire hp_Alarm_latch_async_rst = clk | hp_Alarm_rst | wb_hp_Alarm_rst | reset | hp_Alarm;
+always @(posedge hp_Alarm_latch_async_rst)
 begin
     if (hp_Alarm_rst | wb_hp_Alarm_rst | reset)
         hp_Alarm_latch <= 0;
@@ -164,8 +165,8 @@ end
 reg [7:0] hp_Alarm_ctr = 0;
 wire hp_Alarm_ctr_rst;
 reg wb_hp_Alarm_ctr_rst = 0;
-wire hp_Alarm_ctr_async_rst = hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset | hp_Alarm;
-always @(posedge clk or hp_Alarm_ctr_async_rst)
+wire hp_Alarm_ctr_async_rst = clk | hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset | hp_Alarm;
+always @(posedge hp_Alarm_ctr_async_rst)
 begin
     if (hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset)
         hp_Alarm_ctr <= 0;
@@ -175,7 +176,7 @@ end
 
 // writes
 reg [7:0] Alarm_counter = 0;
-always @(posedge clk or reset)
+always @(posedge clk)
 begin
     if (reset)
     begin
@@ -194,7 +195,7 @@ begin
 end
 
 // reads
-always @(posedge clk or reset) begin
+always @(posedge clk) begin
     if (reset)
     begin
         o_wb_data <= 32'h0;
@@ -209,7 +210,7 @@ always @(posedge clk or reset) begin
 end
 
 // acks
-always @(posedge clk or reset) begin
+always @(posedge clk) begin
     if (reset)
         o_wb_ack <= 0;
     else
