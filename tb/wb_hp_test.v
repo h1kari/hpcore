@@ -1,4 +1,24 @@
 `timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 06/08/2021 10:52:36 AM
+// Design Name: 
+// Module Name: wb_hp_test
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
 
 module wb_hp_test();
 
@@ -8,8 +28,7 @@ reg [31:0] i_wb_addr, i_wb_data;
 wire o_wb_ack, o_wb_stall;
 wire [31:0] o_wb_data;
 wire [15:0] gpio_i, gpio_enb, gpio_o;
-reg glitch = 0;
-
+wire glitch;
 wb_hp wb_hp (
     .clk(clk),
     .reset(reset),
@@ -32,21 +51,15 @@ wb_hp wb_hp (
     .glitch(glitch)
 );
 
-reg hp_vcc, hp_Alarm_rst, hp_Alarm_ctr_rst;
+reg hp_vcc, hp_Alarm_rst, hp_Alarm_ctr_rst, hp_glitch_en;
 wire hp_Alarm, hp_Alarm_latch;
 wire [7:0] hp_Alarm_ctr;
 
-assign gpio_i = {13'h0, hp_Alarm_ctr_rst, hp_Alarm_rst, hp_vcc};
+assign gpio_i = {2'b11, 10'h0, hp_glitch_en, hp_Alarm_ctr_rst, hp_Alarm_rst, hp_vcc};
 assign hp_Alarm = gpio_o[4];
 assign hp_Alarm_latch = gpio_o[5];
-assign hp_Alarm_ctr = gpio_o[15:8];
+assign hp_Alarm_ctr = gpio_o[13:6];
 
-`define GLITCH \
-    #0.1; \
-    glitch <= 1; \
-    #0.1; \
-    glitch <= 0; \
-    #0.1
 `define WB_WRITE(addr, data) \
     @(posedge clk); \
     #0.1; \
@@ -81,14 +94,15 @@ assign hp_Alarm_ctr = gpio_o[15:8];
     @(posedge clk); \
     $display("wb_read(0x%x) = 0x%x", addr, o_wb_data)
 `define PRINT_STATS \
-    $display("hp_vcc=%d hp_Alarm_rst=%d hp_Alarm_ctr_rst=%d hp_Alarm=%d hp_Alarm_latch=%d hp_Alarm_ctr=%d", \
-        wb_hp_vcc, wb_hp_Alarm, wb_hp_Alarm_ctr_rst, wb_hp_Alarm, wb_hp_Alarm_latch, wb_hp_Alarm_ctr)
-wire wb_hp_vcc = o_wb_data[0];
-wire wb_hp_Alarm_rst = o_wb_data[1];
-wire wb_hp_Alarm_ctr_rst = o_wb_data[2];
-wire wb_hp_Alarm = o_wb_data[4];
-wire wb_hp_Alarm_latch = o_wb_data[5];
-wire [7:0] wb_hp_Alarm_ctr = o_wb_data[15:8];
+    $display("hp_vcc=%d hp_Alarm_rst=%d hp_Alarm_ctr_rst=%d hp_glitch_en=%d hp_Alarm=%d hp_Alarm_latch=%d hp_Alarm_ctr=%d", \
+        wb_hp_vcc, wb_hp_Alarm, wb_hp_Alarm_ctr_rst, wb_hp_glitch_en, wb_hp_Alarm, wb_hp_Alarm_latch, wb_hp_Alarm_ctr)
+wire wb_hp_vcc             = o_wb_data[0];
+wire wb_hp_Alarm_rst       = o_wb_data[1];
+wire wb_hp_Alarm_ctr_rst   = o_wb_data[2];
+wire wb_hp_glitch_en       = o_wb_data[3];
+wire wb_hp_Alarm           = o_wb_data[4];
+wire wb_hp_Alarm_latch     = o_wb_data[5];
+wire [7:0] wb_hp_Alarm_ctr = o_wb_data[13:6];
 always #0.5 clk <= !clk;
 
 initial begin
@@ -108,26 +122,10 @@ initial begin
     #10;
     hp_Alarm_rst <= 0;
     hp_Alarm_ctr_rst <= 0;
-    glitch <= 0;
-    
+    #10;
+    hp_glitch_en <= 1;
     // test glitch detection!
-    #1337;
-    `GLITCH;
-    #3;
-    `GLITCH;
-    #5;
-    `GLITCH;
-    #7;
-    `GLITCH;
-    #11;
-    `GLITCH;
-    #13;
-    `GLITCH;
-    #17;
-    `GLITCH;
-    #19;
-    `GLITCH;
-    #100;
+    #300;
     // verify in waveform that glitches line up and doesn't report "glitch not caught!!" :)
     
     // test Alarm_ctr_rst
@@ -179,7 +177,6 @@ initial begin
     
     // test hp_Alarm_latch
     $display("\n*** TESTING hp_Alarm_latch ***");
-    `GLITCH;
     #10;
     $display("reading hp_Alarm_latch == 1");
     `WB_READ(32'h3000_0000);
@@ -195,7 +192,6 @@ initial begin
     
     // test hp_Alarm_ctr_rst
     $display("\n*** TESTING hp_Alarm_ctr ***");
-    `GLITCH;
     #10;
     $display("reading hp_Alarm_ctr == 3");
     `WB_READ (32'h3000_0000);

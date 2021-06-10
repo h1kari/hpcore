@@ -87,18 +87,20 @@ module wb_hp #(
     inout  wire vssd1,	// User area 1 digital ground
     inout  wire vssd2,	// User area 2 digital ground
 `endif
-    input  wire          clk,
+    input  wire          wb_clk_i,
     input  wire          reset,
 
+    input  wire          user_clock2,
+
     // wb interface
-    input  wire          i_wb_cyc,       // wishbone transaction
-    input  wire          i_wb_stb,       // strobe - data valid and accepted as long as !o_wb_stall
-    input  wire          i_wb_we,        // write enable
-    input  wire  [31:0]  i_wb_addr,      // address
-    input  wire  [31:0]  i_wb_data,      // incoming data
-    output reg           o_wb_ack,       // request is completed 
-    output wire          o_wb_stall,     // cannot accept req
-    output reg  [31:0]   o_wb_data,      // output data
+    input  wire          wbs_cyc_i,       // wishbone transaction
+    input  wire          wbs_stb_i,       // strobe - data valid and accepted as long as !wbs_stall_o
+    input  wire          wbs_we_i,        // write enable
+    input  wire [31:0]   wbs_adr_i,      // address
+    input  wire [31:0]   wbs_dat_i,      // incoming data
+    output reg           wbs_ack_o,       // request is completed 
+    output wire          wbs_stl_o,     // cannot accept req
+    output reg  [31:0]   wbs_dat_o,      // output data
 
     // buttons
     input  wire [15:0]   gpio_i,
@@ -108,17 +110,19 @@ module wb_hp #(
     output wire          glitch
 );
        
-wire hp_Alarm;
-wire hp_vcc, hp_glitch_en;
-reg wb_hp_vcc, wb_hp_glitch_en;
+wire       hp_Alarm;
+wire       hp_vcc,    hp_glitch_en;
+reg        wb_hp_vcc, wb_hp_glitch_en;
 wire [1:0] hp_pn_select;
-reg [1:0] wb_hp_pn_select;
+reg  [1:0] wb_hp_pn_select;
 
 generate
-    if(ENABLE_GLITCH)
+    if (ENABLE_GLITCH)
     begin
-        hp_glitcher hp_glitcher (
-            .clk(clk),
+        hp_glitcher
+        hp_glitcher
+        (
+            .clk(user_clock2),
             .reset(reset),
             .enable(hp_glitch_en | wb_hp_glitch_en),
             .glitch(glitch)
@@ -129,14 +133,18 @@ generate
 endgenerate
 
 wire hp_Alarm_p, hp_Alarm_n;
-hoggephase #(0) hoggephase_p (
-    .CK(clk),
+hoggephase #(0)
+hoggephase_p
+(
+    .CK(user_clock2),
     .VCC(hp_vcc | wb_hp_vcc),
     .Alarm(hp_Alarm_p),
     .glitch(glitch)
 );
-hoggephase #(1) hoggephase_n (
-    .CK(clk),
+hoggephase #(1)
+hoggephase_n
+(
+    .CK(user_clock2),
     .VCC(hp_vcc | wb_hp_vcc),
     .Alarm(hp_Alarm_n),
     .glitch(glitch)
@@ -146,29 +154,29 @@ hoggephase #(1) hoggephase_n (
 assign hp_Alarm = ((hp_pn_select[0] | wb_hp_pn_select[0]) & hp_Alarm_p) |
                   ((hp_pn_select[1] | wb_hp_pn_select[1]) & hp_Alarm_n);
     
-assign o_wb_stall = 0;
+assign wbs_stl_o = 0;
 
 // latch Alarm to catch small glitches
-reg hp_Alarm_latch = 0;
+reg  hp_Alarm_latch = 0;
 wire hp_Alarm_rst;
-reg wb_hp_Alarm_rst = 0;
-wire hp_Alarm_latch_async_rst = clk | hp_Alarm_rst | wb_hp_Alarm_rst | reset | hp_Alarm;
-always @(posedge hp_Alarm_latch_async_rst)
+reg  wb_hp_Alarm_rst = 0;
+wire hp_Alarm_latch_async_rst = hp_Alarm_rst | wb_hp_Alarm_rst | reset;
+always @(*) //hp_Alarm_latch_async_rst or hp_Alarm)
 begin
-    if (hp_Alarm_rst | wb_hp_Alarm_rst | reset)
+    if (hp_Alarm_latch_async_rst)
         hp_Alarm_latch <= 0;
-    else if(hp_Alarm)
+    else if (hp_Alarm)
         hp_Alarm_latch <= 1;
 end
 
 // implement counter clocked by alarm signal, this in theory shouldn't be faster than the speed of clk ?
-reg [7:0] hp_Alarm_ctr = 0;
+reg  [7:0] hp_Alarm_ctr = 0;
 wire hp_Alarm_ctr_rst;
-reg wb_hp_Alarm_ctr_rst = 0;
-wire hp_Alarm_ctr_async_rst = clk | hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset | hp_Alarm;
-always @(posedge hp_Alarm_ctr_async_rst)
+reg  wb_hp_Alarm_ctr_rst = 0;
+wire hp_Alarm_ctr_async_rst = hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset;
+always @(*) //hp_Alarm_ctr_async_rst or hp_Alarm)
 begin
-    if (hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset)
+    if (hp_Alarm_ctr_async_rst)
         hp_Alarm_ctr <= 0;
     else if (hp_Alarm)
         hp_Alarm_ctr <= hp_Alarm_ctr + 1;
@@ -176,7 +184,7 @@ end
 
 // writes
 reg [7:0] Alarm_counter = 0;
-always @(posedge clk)
+always @(posedge wb_clk_i)
 begin
     if (reset)
     begin
@@ -184,38 +192,52 @@ begin
         wb_hp_Alarm_rst     <= 0;
         wb_hp_Alarm_ctr_rst <= 0;
         wb_hp_glitch_en     <= 0;
+        wb_hp_pn_select     <= 0;
     end
-    else if(i_wb_stb && i_wb_cyc && i_wb_we && !o_wb_stall && i_wb_addr == BASE_ADDRESS) begin
-        wb_hp_vcc           <= i_wb_data[0];
-        wb_hp_Alarm_rst     <= i_wb_data[1];
-        wb_hp_Alarm_ctr_rst <= i_wb_data[2];
-        wb_hp_glitch_en     <= i_wb_data[3];
-        wb_hp_pn_select     <= i_wb_data[15:14];
+    else if (wbs_stb_i && wbs_cyc_i && wbs_we_i && !wbs_stl_o &&
+             wbs_adr_i == BASE_ADDRESS)
+    begin
+        wb_hp_vcc           <= wbs_dat_i[0];
+        wb_hp_Alarm_rst     <= wbs_dat_i[1];
+        wb_hp_Alarm_ctr_rst <= wbs_dat_i[2];
+        wb_hp_glitch_en     <= wbs_dat_i[3];
+        wb_hp_pn_select     <= wbs_dat_i[15:14];
     end
 end
 
 // reads
-always @(posedge clk) begin
+always @(posedge wb_clk_i)
+begin
     if (reset)
     begin
-        o_wb_data <= 32'h0;
+        wbs_dat_o <= 32'h0;
     end
     else
     begin
-        if (i_wb_stb && i_wb_cyc && !i_wb_we && !o_wb_stall && i_wb_addr == BASE_ADDRESS)
-            o_wb_data <= {16'h0, wb_hp_pn_select, hp_Alarm_ctr, hp_Alarm_latch, hp_Alarm, wb_hp_glitch_en, wb_hp_Alarm_ctr_rst, wb_hp_Alarm_rst, wb_hp_vcc};
+        if (wbs_stb_i && wbs_cyc_i && !wbs_we_i && !wbs_stl_o &&
+            wbs_adr_i == BASE_ADDRESS)
+        begin
+            wbs_dat_o <= {16'h0,
+                          wb_hp_pn_select,
+                          hp_Alarm_ctr, hp_Alarm_latch, hp_Alarm,
+                          wb_hp_glitch_en, wb_hp_Alarm_ctr_rst,
+                          wb_hp_Alarm_rst, wb_hp_vcc};
+        end
         else
-            o_wb_data <= 32'h0;
+        begin
+            wbs_dat_o <= 32'h0;
+        end
     end
 end
 
 // acks
-always @(posedge clk) begin
+always @(posedge wb_clk_i)
+begin
     if (reset)
-        o_wb_ack <= 0;
+        wbs_ack_o <= 0;
     else
         // return ack immediately
-        o_wb_ack <= (i_wb_stb && !o_wb_stall && (i_wb_addr == BASE_ADDRESS));
+        wbs_ack_o <= (wbs_stb_i && !wbs_stl_o && (wbs_adr_i == BASE_ADDRESS));
 end
 
 // gpio inputs
