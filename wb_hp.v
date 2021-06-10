@@ -172,20 +172,23 @@ end
 reg  [7:0] hp_Alarm_ctr = 0, hp_Alarm_ctr_val = 0;
 wire hp_Alarm_ctr_rst;
 reg  wb_hp_Alarm_ctr_rst = 0;
+wire hp_Alarm_rst_sync = hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset | hp_Alarm;
 always @(*)
 begin
     if (hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset)
     begin
-        hp_Alarm_ctr     <= 0;
         hp_Alarm_ctr_val <= 0;
     end
     else
     begin
         if (hp_Alarm)
             hp_Alarm_ctr_val <= hp_Alarm_ctr + 1;
-        else
-            hp_Alarm_ctr <= hp_Alarm_ctr_val;
-    end
+    end  
+end
+
+always @(negedge hp_Alarm_rst_sync)
+begin
+    hp_Alarm_ctr <= hp_Alarm_ctr_val;
 end
 
 // writes
