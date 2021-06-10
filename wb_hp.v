@@ -160,30 +160,35 @@ assign wbs_stl_o = 0;
 reg  hp_Alarm_latch = 0;
 wire hp_Alarm_rst;
 reg  wb_hp_Alarm_rst = 0;
-wire hp_Alarm_latch_async_rst = hp_Alarm_rst | wb_hp_Alarm_rst | reset;
-always @(*) //hp_Alarm_latch_async_rst or hp_Alarm)
+always @(*)
 begin
-    if (hp_Alarm_latch_async_rst)
+    if (hp_Alarm_rst | wb_hp_Alarm_rst | reset)
         hp_Alarm_latch <= 0;
     else if (hp_Alarm)
         hp_Alarm_latch <= 1;
 end
 
 // implement counter clocked by alarm signal, this in theory shouldn't be faster than the speed of clk ?
-reg  [7:0] hp_Alarm_ctr = 0;
+reg  [7:0] hp_Alarm_ctr = 0, hp_Alarm_ctr_val = 0;
 wire hp_Alarm_ctr_rst;
 reg  wb_hp_Alarm_ctr_rst = 0;
-wire hp_Alarm_ctr_async_rst = hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset;
-always @(*) //hp_Alarm_ctr_async_rst or hp_Alarm)
+always @(*)
 begin
-    if (hp_Alarm_ctr_async_rst)
-        hp_Alarm_ctr <= 0;
-    else if (hp_Alarm)
-        hp_Alarm_ctr <= hp_Alarm_ctr + 1;
+    if (hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset)
+    begin
+        hp_Alarm_ctr     <= 0;
+        hp_Alarm_ctr_val <= 0;
+    end
+    else
+    begin
+        if (hp_Alarm)
+            hp_Alarm_ctr_val <= hp_Alarm_ctr + 1;
+        else
+            hp_Alarm_ctr <= hp_Alarm_ctr_val;
+    end
 end
 
 // writes
-reg [7:0] Alarm_counter = 0;
 always @(posedge wb_clk_i)
 begin
     if (reset)

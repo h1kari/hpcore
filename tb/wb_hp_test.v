@@ -22,7 +22,7 @@
 
 module wb_hp_test();
 
-reg clk = 0, reset;
+reg clk = 0, clk2 = 0, reset;
 reg i_wb_cyc, i_wb_stb, i_wb_we;
 reg [31:0] i_wb_addr, i_wb_data;
 wire o_wb_ack, o_wb_stall;
@@ -30,25 +30,26 @@ wire [31:0] o_wb_data;
 wire [15:0] gpio_i, gpio_enb, gpio_o;
 wire glitch;
 wb_hp wb_hp (
-    .clk(clk),
-    .reset(reset),
+    .wb_clk_i  (clk),
+    .reset     (reset),
+    .user_clock2(clk2),
 
     // wb interface
-    .i_wb_cyc(i_wb_cyc),       // wishbone transaction
-    .i_wb_stb(i_wb_stb),       // strobe - data valid and accepted as long as !o_wb_stall
-    .i_wb_we(i_wb_we),         // write enable
-    .i_wb_addr(i_wb_addr),     // address
-    .i_wb_data(i_wb_data),     // incoming data
-    .o_wb_ack(o_wb_ack),       // request is completed 
-    .o_wb_stall(o_wb_stall),   // cannot accept req
-    .o_wb_data(o_wb_data),     // output data
+    .wbs_cyc_i (i_wb_cyc),       // wishbone transaction
+    .wbs_stb_i (i_wb_stb),       // strobe - data valid and accepted as long as !o_wb_stall
+    .wbs_we_i  (i_wb_we),         // write enable
+    .wbs_adr_i (i_wb_addr),     // address
+    .wbs_dat_i (i_wb_data),     // incoming data
+    .wbs_ack_o (o_wb_ack),       // request is completed 
+    .wbs_stl_o (o_wb_stall),   // cannot accept req
+    .wbs_dat_o (o_wb_data),     // output data
 
     // buttons
-    .gpio_i(gpio_i),
-    .gpio_enb(gpio_enb),       // not enable - low for active
-    .gpio_o(gpio_o),
+    .gpio_i    (gpio_i),
+    .gpio_enb  (gpio_enb),       // not enable - low for active
+    .gpio_o    (gpio_o),
     
-    .glitch(glitch)
+    .glitch    (glitch)
 );
 
 reg hp_vcc, hp_Alarm_rst, hp_Alarm_ctr_rst, hp_glitch_en;
@@ -103,7 +104,8 @@ wire wb_hp_glitch_en       = o_wb_data[3];
 wire wb_hp_Alarm           = o_wb_data[4];
 wire wb_hp_Alarm_latch     = o_wb_data[5];
 wire [7:0] wb_hp_Alarm_ctr = o_wb_data[13:6];
-always #0.5 clk <= !clk;
+always #1.1 clk <= !clk;
+always #0.5 clk2 <= !clk;
 
 initial begin
     reset     <= 1;
@@ -125,7 +127,7 @@ initial begin
     #10;
     hp_glitch_en <= 1;
     // test glitch detection!
-    #300;
+    #500;
     // verify in waveform that glitches line up and doesn't report "glitch not caught!!" :)
     
     // test Alarm_ctr_rst
