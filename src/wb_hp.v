@@ -45,14 +45,15 @@ module hp_glitcher #(
     output wire glitch
 );
 
-reg [19:0] counter = 0;
+reg [10:0] counter = 0;
 reg glitch_r = 0;
 always @(posedge clk)
 begin
     glitch_r <= 0;
     if (reset | !enable)
         counter <= 0;
-    else if (enable)
+    // increment counter if enabled, but don't repeat
+    else if (enable & ~counter[10])
     begin
         counter <= counter + 1;
         case(counter)

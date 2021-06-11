@@ -9,10 +9,11 @@ module hp_mod #(
     output reg Data = 0
 );
 
+// create CK2 to run at half CK speed so we can catch inverse phase glitches
 always @(posedge CK)
     CK2 <= !CK2;
 
-// create ring oscillator with data at f/2
+// create ring oscillator with data at CK2/2
 always @(posedge CK)
     if (CK2 == INVERT) begin
         if(VCC == 0)
@@ -29,6 +30,7 @@ module hp_pd #(
 ) (
     input  wire CK,
     input  wire CK2,
+    input  wire VCC,
     input  wire Data,
     output wire Alarm    
 );
@@ -38,12 +40,22 @@ module hp_pd #(
 reg B = 0, A = 0;
 
 always @(posedge CK)
+    // use CK/CK2 to let us do posedge or negedge triggering
     if (CK2 == INVERT)
-        #0.1 B <= Data;
+        // disable output if VCC is low
+        if(VCC == 0)
+            #0.1 B <= 0;
+        else
+            #0.1 B <= Data;
 
 always @(posedge CK)
+    // use CK/CK2 to let us do posedge or negedge triggering
     if (CK2 != INVERT)
-        #0.1 A <= B;
+        // disable output if VCC is low
+        if(VCC == 0)
+            #0.1 A <= 0;
+        else
+            #0.1 A <= B;
 
 wire Y, X;
 assign Y = Data ^ B;
@@ -71,11 +83,21 @@ hp_mod #(INVERT) hp_mod (
     .Data(Data)
 );
 
+wire Alarm_w;
 hp_pd #(INVERT) hp_pd (
     .CK(CK),
     .CK2(CK2),
+    .VCC(VCC),
     .Data(Data ^ glitch),
-    .Alarm(Alarm)
+    .Alarm(Alarm_w)
 );
+
+// delay VCC signal to enable Alarm output after phase detector has started up
+reg [2:0] VCC_ = 0;
+always @(posedge CK2)
+    VCC_ <= {VCC_[1:0], VCC};
+
+// only output Alarm when VCC is high
+assign Alarm = Alarm_w & VCC_[2] & VCC;
 
 endmodule
