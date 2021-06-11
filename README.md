@@ -1,2 +1,6 @@
-# hpcore
-Hogge Phase EMFI Detector
+# Hogge Phase EMFI/BBI Detector
+This project implements the EMFI detector as outlined in [An Electromagnetic Fault Injection Sensor using Hogge Phase-Detector](https://dr.ntu.edu.sg/bitstream/10356/88795/1/isqed_2017.pdf) by Jakub Breier, Shivam Bhasin, and Wei He. The principle is that by generating a data signal from a clock source and then detecting it's phase to the clock you can detect clock, timing, and other glitch effects. During normal operation, the data should be perfectly in phase with the clock, but if core voltage is effected timing will change and the data will become out of phase. Similarly if noise is injected into either the clock or data lines, this will be detected as well and trigger the Alarm.
+
+While implementing the basic design it was noticed that short glitches on the negative phase of the clock weren't detected, so one improvement is that this design also includes an phase detector for the inverted clock which seems to provide better coverage and either detector or both can be selected through GPIO or the wishbone interface.
+
+This was built to run with the Skywater130 PDK for the Google/Efabless MPW2 so the alarm latching mechanism had to be adjusted to deal with the constraints of their limited stdcell libraries, but will soon be tested on FPGA to verify it works in hardware and will soon be verified in silicon as well.
