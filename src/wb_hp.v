@@ -76,7 +76,8 @@ endmodule
 module wb_hp #(
     parameter   [1:0]   DESIGN             = 2,
     parameter   [31:0]  BASE_ADDRESS       = 32'h3000_0000,        // base address
-    parameter           ENABLE_GLITCH      = 1
+    parameter           ENABLE_GLITCH      = 1,
+    parameter           RESET_SHR          = 16
 ) (
 `ifdef USE_POWER_PINS
     inout  wire vdda1,	// User area 1 3.3V supply
@@ -158,38 +159,70 @@ assign hp_Alarm = ((hp_pn_select[0] | wb_hp_pn_select[0]) & hp_Alarm_p) |
 assign wbs_stl_o = 0;
 
 // latch Alarm to catch small glitches
-reg  hp_Alarm_latch = 0;
+reg  hp_Alarm_latch;
 wire hp_Alarm_rst;
 reg  wb_hp_Alarm_rst = 0;
+
+// use shift register to make sure reset is held high for 16 clock cycles to try to prevent glitches from resetting latch
+reg  [RESET_SHR-1:0] hp_Alarm_rst_shr = 0;
+always @(posedge user_clock2)
+begin
+    hp_Alarm_rst_shr <= {hp_Alarm_rst_shr[RESET_SHR-1:0], hp_Alarm_rst | wb_hp_Alarm_rst | reset};
+end
+
 always @(*)
 begin
-    if (hp_Alarm_rst | wb_hp_Alarm_rst | reset)
+    if (&hp_Alarm_rst_shr)
         hp_Alarm_latch <= 0;
     else if (hp_Alarm)
         hp_Alarm_latch <= 1;
 end
 
-// implement counter clocked by alarm signal, this in theory shouldn't be faster than the speed of clk ?
-reg  [7:0] hp_Alarm_ctr = 0, hp_Alarm_ctr_val = 0;
-wire hp_Alarm_ctr_rst;
-reg  wb_hp_Alarm_ctr_rst = 0;
-wire hp_Alarm_rst_sync = hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset | hp_Alarm;
+// create separate latch that's reset after we've generated our sync signal
+reg hp_Alarm_latch_sync = 0;
+reg hp_Alarm_latch_async;
+reg hp_Alarm_latch_async_0 = 0;
 always @(*)
 begin
-    if (hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset)
+    if (hp_Alarm_latch_sync)
+        hp_Alarm_latch_async <= 0;
+    else if (hp_Alarm & !hp_Alarm_latch_async_0)
+        hp_Alarm_latch_async <= 1;
+end
+
+// generate signal that goes high on positive edge of hp_Alarm_latch that is synchronous to clock
+always @(posedge user_clock2)
+begin
+    if (hp_Alarm_latch_async & !hp_Alarm_latch_async_0)
+        hp_Alarm_latch_sync <= 1;
+    else
+        hp_Alarm_latch_sync <= 0;
+    hp_Alarm_latch_async_0 <= hp_Alarm_latch_async;
+end
+
+// implement counter clocked by alarm signal, this in theory shouldn't be faster than the speed of clk ?
+reg  [7:0] hp_Alarm_ctr = 0;
+wire hp_Alarm_ctr_rst;
+reg  wb_hp_Alarm_ctr_rst = 0;
+
+// use shift register to make sure reset is held high for 16 clock cycles to try to prevent glitches from resetting latch
+reg [RESET_SHR-1:0] hp_Alarm_ctr_rst_shr = 0;
+always @(posedge user_clock2)
+begin
+    hp_Alarm_ctr_rst_shr <= {hp_Alarm_ctr_rst_shr[RESET_SHR-2:0], hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset};
+end
+
+always @(posedge user_clock2)
+begin
+    if (&hp_Alarm_ctr_rst_shr)
     begin
-        hp_Alarm_ctr_val <= 0;
+        hp_Alarm_ctr <= 0;
     end
     else
     begin
-        if (hp_Alarm)
-            hp_Alarm_ctr_val <= hp_Alarm_ctr + 1;
+        if (hp_Alarm_latch_sync)
+            hp_Alarm_ctr <= hp_Alarm_ctr + 1;
     end  
-end
-
-always @(negedge hp_Alarm_rst_sync)
-begin
-    hp_Alarm_ctr <= hp_Alarm_ctr_val;
 end
 
 // writes

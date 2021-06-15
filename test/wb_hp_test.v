@@ -137,6 +137,7 @@ initial begin
     else $display("pass");
     @(posedge clk);
     hp_Alarm_ctr_rst <= 1;
+    #100;
     @(posedge clk);
     hp_Alarm_ctr_rst <= 0;
     #10;
@@ -152,6 +153,7 @@ initial begin
     else $display("pass");
     @(posedge clk);
     hp_Alarm_rst <= 1;
+    #100;
     @(posedge clk);
     hp_Alarm_rst <= 0;
     #10;
@@ -184,7 +186,7 @@ initial begin
     `WB_READ(32'h3000_0000);
     `PRINT_STATS;
     `WB_WRITE(32'h3000_0000, 2 | 1);
-    #10;
+    #100;
     `WB_WRITE(32'h3000_0000, 1);
     $display("reading hp_Alarm_latch == 0");
     `WB_READ (32'h3000_0000);
@@ -199,7 +201,7 @@ initial begin
     `WB_READ (32'h3000_0000);
     `PRINT_STATS;
     `WB_WRITE(32'h3000_0000, 4 | 1);
-    #10;
+    #100;
     `WB_WRITE(32'h3000_0000, 1);
     $display("reading hp_Alarm_ctr == 0");
     `WB_READ (32'h3000_0000);
