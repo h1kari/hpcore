@@ -52,14 +52,14 @@ wb_hp wb_hp (
     .glitch    (glitch)
 );
 
-reg hp_vcc, hp_Alarm_rst, hp_Alarm_ctr_rst, hp_glitch_en;
-wire hp_Alarm, hp_Alarm_latch;
-wire [7:0] hp_Alarm_ctr;
+reg hp_vcc, hp_alarm_rst, hp_alarm_ctr_rst, hp_glitch_en;
+wire hp_alarm, hp_alarm_latch;
+wire [7:0] hp_alarm_ctr;
 
-assign gpio_i = {2'b11, 10'h0, hp_glitch_en, hp_Alarm_ctr_rst, hp_Alarm_rst, hp_vcc};
-assign hp_Alarm = gpio_o[4];
-assign hp_Alarm_latch = gpio_o[5];
-assign hp_Alarm_ctr = gpio_o[13:6];
+assign gpio_i = {2'b11, 10'h0, hp_glitch_en, hp_alarm_ctr_rst, hp_alarm_rst, hp_vcc};
+assign hp_alarm = gpio_o[4];
+assign hp_alarm_latch = gpio_o[5];
+assign hp_alarm_ctr = gpio_o[13:6];
 
 `define WB_WRITE(addr, data) \
     @(posedge clk); \
@@ -95,15 +95,15 @@ assign hp_Alarm_ctr = gpio_o[13:6];
     @(posedge clk); \
     $display("wb_read(0x%x) = 0x%x", addr, o_wb_data)
 `define PRINT_STATS \
-    $display("hp_vcc=%d hp_Alarm_rst=%d hp_Alarm_ctr_rst=%d hp_glitch_en=%d hp_Alarm=%d hp_Alarm_latch=%d hp_Alarm_ctr=%d", \
-        wb_hp_vcc, wb_hp_Alarm, wb_hp_Alarm_ctr_rst, wb_hp_glitch_en, wb_hp_Alarm, wb_hp_Alarm_latch, wb_hp_Alarm_ctr)
+    $display("hp_vcc=%d hp_alarm_rst=%d hp_alarm_ctr_rst=%d hp_glitch_en=%d hp_alarm=%d hp_alarm_latch=%d hp_alarm_ctr=%d", \
+        wb_hp_vcc, wb_hp_alarm, wb_hp_alarm_ctr_rst, wb_hp_glitch_en, wb_hp_alarm, wb_hp_alarm_latch, wb_hp_alarm_ctr)
 wire wb_hp_vcc             = o_wb_data[0];
-wire wb_hp_Alarm_rst       = o_wb_data[1];
-wire wb_hp_Alarm_ctr_rst   = o_wb_data[2];
+wire wb_hp_alarm_rst       = o_wb_data[1];
+wire wb_hp_alarm_ctr_rst   = o_wb_data[2];
 wire wb_hp_glitch_en       = o_wb_data[3];
-wire wb_hp_Alarm           = o_wb_data[4];
-wire wb_hp_Alarm_latch     = o_wb_data[5];
-wire [7:0] wb_hp_Alarm_ctr = o_wb_data[13:6];
+wire wb_hp_alarm           = o_wb_data[4];
+wire wb_hp_alarm_latch     = o_wb_data[5];
+wire [7:0] wb_hp_alarm_ctr = o_wb_data[13:6];
 always #1.1 clk <= !clk;
 always #0.5 clk2 <= !clk;
 
@@ -115,51 +115,51 @@ initial begin
     i_wb_addr <= 0;
     i_wb_data <= 0;
     hp_vcc           <= 0;
-    hp_Alarm_rst     <= 1;
-    hp_Alarm_ctr_rst <= 1;
+    hp_alarm_rst     <= 1;
+    hp_alarm_ctr_rst <= 1;
     
     #100;
     reset  <= 0;
     hp_vcc <= 1;
     #10;
-    hp_Alarm_rst <= 0;
-    hp_Alarm_ctr_rst <= 0;
+    hp_alarm_rst <= 0;
+    hp_alarm_ctr_rst <= 0;
     #10;
     hp_glitch_en <= 1;
     // test glitch detection!
     #500;
     // verify in waveform that glitches line up and doesn't report "glitch not caught!!" :)
     
-    // test Alarm_ctr_rst
-    $display("\n*** TESTING hp_Alarm_ctr ***");
-    $display("Alarm_ctr: %d", hp_Alarm_ctr);
-    if(hp_Alarm_ctr < 8) $display("!!! FAIL !!!");
+    // test alarm_ctr_rst
+    $display("\n*** TESTING hp_alarm_ctr ***");
+    $display("alarm_ctr: %d", hp_alarm_ctr);
+    if(hp_alarm_ctr < 8) $display("!!! FAIL !!!");
     else $display("pass");
     @(posedge clk);
-    hp_Alarm_ctr_rst <= 1;
+    hp_alarm_ctr_rst <= 1;
     #100;
     @(posedge clk);
-    hp_Alarm_ctr_rst <= 0;
+    hp_alarm_ctr_rst <= 0;
     #10;
     @(posedge clk);
-    $display("Alarm_ctr: %d", hp_Alarm_ctr);
-    if(hp_Alarm_ctr != 0) $display("!!! FAIL !!!");
+    $display("alarm_ctr: %d", hp_alarm_ctr);
+    if(hp_alarm_ctr != 0) $display("!!! FAIL !!!");
     else $display("pass");
     
-    // test Alarm_latch_rst
-    $display("\n*** TESTING hp_Alarm_latch ***");
-    $display("Alarm_latch: %d", hp_Alarm_latch);
-    if(hp_Alarm_latch != 1) $display("!!! FAIL !!!");
+    // test alarm_latch_rst
+    $display("\n*** TESTING hp_alarm_latch ***");
+    $display("alarm_latch: %d", hp_alarm_latch);
+    if(hp_alarm_latch != 1) $display("!!! FAIL !!!");
     else $display("pass");
     @(posedge clk);
-    hp_Alarm_rst <= 1;
+    hp_alarm_rst <= 1;
     #100;
     @(posedge clk);
-    hp_Alarm_rst <= 0;
+    hp_alarm_rst <= 0;
     #10;
     @(posedge clk);
-    $display("Alarm_latch: %d", hp_Alarm_latch);
-    if(hp_Alarm_latch != 0) $display("!!! FAIL !!!");
+    $display("alarm_latch: %d", hp_alarm_latch);
+    if(hp_alarm_latch != 0) $display("!!! FAIL !!!");
     else $display("pass");
     #10;
     
@@ -179,40 +179,40 @@ initial begin
     if(wb_hp_vcc != 1) $display("!!! FAIL !!!");
     else $display("pass");
     
-    // test hp_Alarm_latch
-    $display("\n*** TESTING hp_Alarm_latch ***");
+    // test hp_alarm_latch
+    $display("\n*** TESTING hp_alarm_latch ***");
     #10;
-    $display("reading hp_Alarm_latch == 1");
+    $display("reading hp_alarm_latch == 1");
     `WB_READ(32'h3000_0000);
     `PRINT_STATS;
     `WB_WRITE(32'h3000_0000, 2 | 1);
     #100;
     `WB_WRITE(32'h3000_0000, 1);
-    $display("reading hp_Alarm_latch == 0");
+    $display("reading hp_alarm_latch == 0");
     `WB_READ (32'h3000_0000);
     `PRINT_STATS;
-    if(wb_hp_Alarm_latch != 0) $display("!!! FAIL !!!");
+    if(wb_hp_alarm_latch != 0) $display("!!! FAIL !!!");
     else $display("pass");
     
-    // test hp_Alarm_ctr_rst
-    $display("\n*** TESTING hp_Alarm_ctr ***");
+    // test hp_alarm_ctr_rst
+    $display("\n*** TESTING hp_alarm_ctr ***");
     #10;
-    $display("reading hp_Alarm_ctr == 3");
+    $display("reading hp_alarm_ctr == 3");
     `WB_READ (32'h3000_0000);
     `PRINT_STATS;
     `WB_WRITE(32'h3000_0000, 4 | 1);
     #100;
     `WB_WRITE(32'h3000_0000, 1);
-    $display("reading hp_Alarm_ctr == 0");
+    $display("reading hp_alarm_ctr == 0");
     `WB_READ (32'h3000_0000);
     `PRINT_STATS;
-    if(wb_hp_Alarm_ctr != 0) $display("!!! FAIL !!!");
+    if(wb_hp_alarm_ctr != 0) $display("!!! FAIL !!!");
     else $display("pass");
     #100;
     $finish;
 end
 
 always @(negedge glitch)
-    if(!hp_Alarm) $display("!!! FAIL !!! Glitch not caught!!");
+    if(!hp_alarm) $display("!!! FAIL !!! Glitch not caught!!");
 
 endmodule

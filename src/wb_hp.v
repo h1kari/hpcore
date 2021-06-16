@@ -1,33 +1,35 @@
 `default_nettype none
 
+/*
+ * This whole file builds a GPIO and wishbone interface for
+ * interacting with the hoggephase module. It instatiates
+ * both a positive & negative version of the hoggephase
+ * detector and then adds on a latch to save the alarm
+ * signal and a counter to see if multiple alarms are caught.
+ * 
+ * GPIO / Wishbone I/O:
+ * 0      vcc            [I]
+ * 1      alarm_rst      [I]
+ * 2      alarm_ctr_rst  [I]
+ * 3      glitch         [I]
+ * 4      alarm          [O]
+ * 5      alarm_latch    [O]
+ * 6:13   alarm_ctr      [O]
+ * 15:14  pn_select      [I]
+ */
+
 //`define USE_POWER_PINS 1
 `define IO_INPUT  1'b1
 `define IO_OUTPUT 1'b0
-`define SET_IO_OUTPUT(sig, pin) \
-    assign gpio_enb[pin] = {16{`IO_OUTPUT}}; \
-    assign gpio_o[pin] = sig
-`define SET_IO_INPUT(sig, pin) \
-    assign gpio_enb[pin] = {16{`IO_INPUT}}; \
-    assign sig = gpio_i[pin] 
-`define SET_IO_NA(pin) \
-    assign gpio_enb[pin] = {16{`IO_INPUT}}
     
-/* gpio/wb settings:
- * 0 - vcc           [I]
- * 1 - Alarm_rst     [I]
- * 2 - Alarm_ctr_rst [I]
- * 3 - Glitch        [I]
- * 4 - Alarm         [O]
- * 5 - Alarm_latch   [O]
- * 6:13 - Alarm_ctr  [O]
- * 15:14 - PN_select [I]
- *
- * design options:
- * 0 - only positive detector
- * 1 - only negative detector
- * 2 - both detectors
+
+/*
+ * Simulate glitches to test detection capability
+ * We're a bit limited with this because we can only generate
+ * glitches synchronously (easily). Note that if this accidentally
+ * gets triggered by a glitch event, it will insert glitches 137
+ * clock cycles after the glitch event.
  */
- 
 module hp_glitcher #(
     parameter GLITCH_OFF = 137,
     parameter GLITCH0 = GLITCH_OFF + 3,
@@ -45,8 +47,8 @@ module hp_glitcher #(
     output wire glitch
 );
 
-reg [10:0] counter = 0;
-reg glitch_r = 0;
+reg [10:0] counter;
+reg glitch_r;
 always @(posedge clk)
 begin
     glitch_r <= 0;
@@ -73,11 +75,142 @@ assign glitch = glitch_r & !clk;
 
 endmodule
 
+
+/*
+ * For our glitch latches they can sometimes be reset if
+ * their reset signals are themselves glitched. To prevent
+ * this we use a shift register to ensure that the reset is
+ * held high for RESET_SHR clock cycles to generate our
+ * actual reset.
+ */
+module reset_shr #(
+    parameter RESET_SHR = 16
+) (
+    input  wire clk,
+    input  wire reset,
+    output wire reset_shr
+);
+
+// use shift register to make sure reset is held high for 16 clock cycles to try to prevent glitches from resetting latch
+reg  [RESET_SHR-1:0] shr;
+always @(posedge clk)
+    shr <= {shr[RESET_SHR-1:0], reset};
+
+// reset_shr only goes high when all bits of shr are high
+assign reset_shr = &shr;
+
+endmodule
+
+
+/*
+ * Implement a latch that will go high if an alarm
+ * signal is detected. Alarm signals go high between
+ * clock cycles so they can't be latched synchronously
+ * which may create some issues on FPGA vs ASIC vs SIM.
+ */
+module hp_alarm_latch #(
+    parameter RESET_SHR = 16
+) (
+    input  wire clk,
+    input  wire reset,
+    input  wire hp_alarm,
+    output reg  hp_alarm_latch
+);
+
+// anti-glitch our reset
+wire reset_shr;
+reset_shr #(RESET_SHR) reset_shr_inst (
+    .clk(clk),
+    .reset(reset),
+    .reset_shr(reset_shr)
+);
+
+always @(*)
+begin
+    if (reset_shr)
+        hp_alarm_latch <= 0;
+    else if (hp_alarm)
+        hp_alarm_latch <= 1;
+end
+
+endmodule
+
+
+/*
+ * Increment a counter for every alarm signal that's
+ * detected. This is a bit tricky as we need to first
+ * convert the alarm to a synchronous signal and then
+ * use that to increment a counter synchronously.
+ * The limitation of this method is that we will not
+ * increment for multiple glitches per clock cycle
+ * but should give us a general idea of how many glitches
+ * have happened over time. Note that this register can
+ * be effected by the glitch itsself and may be reset
+ * or end up with a strange count value some of the time.
+ */
+module hp_alarm_ctr #(
+    parameter RESET_SHR = 16
+) (
+    input  wire      clk,
+    input  wire      reset,
+    input  wire      hp_alarm,
+    output reg [7:0] hp_alarm_ctr
+);
+
+// anti-glitch our reset
+wire reset_shr;
+reset_shr #(RESET_SHR) reset_shr_inst (
+    .clk(clk),
+    .reset(reset),
+    .reset_shr(reset_shr)
+);
+
+// create separate latch that's reset after we've generated our sync signal
+reg latch_sync, latch_async, latch_async_0;
+always @(*)
+begin
+    if (latch_sync | reset_shr)
+        latch_async <= 0;
+    else if (hp_alarm & !latch_async_0)
+        latch_async <= 1;
+end
+
+// generate signal that goes high on positive edge of hp_alarm_latch that is synchronous to clock
+always @(posedge clk)
+begin
+    if (reset_shr)
+        latch_sync <= 0;
+    else
+    begin
+        if (latch_async & !latch_async_0)
+            latch_sync <= 1;
+        else
+            latch_sync <= 0;
+    end
+    latch_async_0 <= latch_async;
+end
+
+// implement counter clocked by alarm signal, this in theory shouldn't be faster than the speed of clk ?
+always @(posedge clk)
+begin
+    if (reset_shr)
+    begin
+        hp_alarm_ctr <= 0;
+    end
+    else
+    begin
+        if (latch_sync)
+            hp_alarm_ctr <= hp_alarm_ctr + 1;
+    end  
+end
+
+endmodule
+
+
 module wb_hp #(
-    parameter   [1:0]   DESIGN             = 2,
-    parameter   [31:0]  BASE_ADDRESS       = 32'h3000_0000,        // base address
-    parameter           ENABLE_GLITCH      = 1,
-    parameter           RESET_SHR          = 16
+    parameter   [31:0]  BASE_ADDRESS = 32'h3000_0000,        // base address
+    parameter           GLITCH_BIST  = 1,
+    parameter           RESET_SHR    = 16
 ) (
 `ifdef USE_POWER_PINS
     inout  wire vdda1,	// User area 1 3.3V supply
@@ -111,20 +244,22 @@ module wb_hp #(
     
     output wire          glitch
 );
+
+wire clk = user_clock2;
        
-wire       hp_Alarm;
+wire       hp_alarm;
 wire       hp_vcc,    hp_glitch_en;
 reg        wb_hp_vcc, wb_hp_glitch_en;
 wire [1:0] hp_pn_select;
 reg  [1:0] wb_hp_pn_select;
 
 generate
-    if (ENABLE_GLITCH)
+    if (GLITCH_BIST)
     begin
         hp_glitcher
         hp_glitcher
         (
-            .clk(user_clock2),
+            .clk(clk),
             .reset(reset),
             .enable(hp_glitch_en | wb_hp_glitch_en),
             .glitch(glitch)
@@ -134,105 +269,60 @@ generate
         assign glitch = 0;
 endgenerate
 
-wire hp_Alarm_p, hp_Alarm_n;
+wire hp_alarm_p, hp_alarm_n;
 hoggephase #(0)
 hoggephase_p
 (
-    .CK(user_clock2),
-    .VCC(hp_vcc | wb_hp_vcc),
-    .Alarm(hp_Alarm_p),
+    .ck(clk),
+    .vcc(hp_vcc | wb_hp_vcc),
+    .alarm(hp_alarm_p),
     .glitch(glitch)
 );
 hoggephase #(1)
 hoggephase_n
 (
-    .CK(user_clock2),
-    .VCC(hp_vcc | wb_hp_vcc),
-    .Alarm(hp_Alarm_n),
+    .ck(clk),
+    .vcc(hp_vcc | wb_hp_vcc),
+    .alarm(hp_alarm_n),
     .glitch(glitch)
 );
 
 // select which detectors to use...
-assign hp_Alarm = ((hp_pn_select[0] | wb_hp_pn_select[0]) & hp_Alarm_p) |
-                  ((hp_pn_select[1] | wb_hp_pn_select[1]) & hp_Alarm_n);
+assign hp_alarm = ((hp_pn_select[0] | wb_hp_pn_select[0]) & hp_alarm_p) |
+                  ((hp_pn_select[1] | wb_hp_pn_select[1]) & hp_alarm_n);
     
 assign wbs_stl_o = 0;
 
-// latch Alarm to catch small glitches
-reg  hp_Alarm_latch;
-wire hp_Alarm_rst;
-reg  wb_hp_Alarm_rst = 0;
+// instantiate alarm latch
+wire hp_alarm_rst;
+reg  wb_hp_alarm_rst;
+wire hp_alarm_latch;
+hp_alarm_latch #(RESET_SHR) hp_alarm_latch_inst (
+    .clk(clk),
+    .reset(hp_alarm_rst | wb_hp_alarm_rst | reset),
+    .hp_alarm(hp_alarm),
+    .hp_alarm_latch(hp_alarm_latch)
+);
 
-// use shift register to make sure reset is held high for 16 clock cycles to try to prevent glitches from resetting latch
-reg  [RESET_SHR-1:0] hp_Alarm_rst_shr = 0;
-always @(posedge user_clock2)
-begin
-    hp_Alarm_rst_shr <= {hp_Alarm_rst_shr[RESET_SHR-1:0], hp_Alarm_rst | wb_hp_Alarm_rst | reset};
-end
+// instantiate alarm latch counter
+wire hp_alarm_ctr_rst;
+reg wb_hp_alarm_ctr_rst;
+wire [7:0] hp_alarm_ctr;
+hp_alarm_ctr #(RESET_SHR) hp_alarm_ctr_inst (
+    .clk(clk),
+    .reset(hp_alarm_ctr_rst | wb_hp_alarm_ctr_rst | reset),
+    .hp_alarm(hp_alarm),
+    .hp_alarm_ctr(hp_alarm_ctr)
+);
 
-always @(*)
-begin
-    if (&hp_Alarm_rst_shr)
-        hp_Alarm_latch <= 0;
-    else if (hp_Alarm)
-        hp_Alarm_latch <= 1;
-end
-
-// create separate latch that's reset after we've generated our sync signal
-reg hp_Alarm_latch_sync = 0;
-reg hp_Alarm_latch_async;
-reg hp_Alarm_latch_async_0 = 0;
-always @(*)
-begin
-    if (hp_Alarm_latch_sync)
-        hp_Alarm_latch_async <= 0;
-    else if (hp_Alarm & !hp_Alarm_latch_async_0)
-        hp_Alarm_latch_async <= 1;
-end
-
-// generate signal that goes high on positive edge of hp_Alarm_latch that is synchronous to clock
-always @(posedge user_clock2)
-begin
-    if (hp_Alarm_latch_async & !hp_Alarm_latch_async_0)
-        hp_Alarm_latch_sync <= 1;
-    else
-        hp_Alarm_latch_sync <= 0;
-    hp_Alarm_latch_async_0 <= hp_Alarm_latch_async;
-end
-
-// implement counter clocked by alarm signal, this in theory shouldn't be faster than the speed of clk ?
-reg  [7:0] hp_Alarm_ctr = 0;
-wire hp_Alarm_ctr_rst;
-reg  wb_hp_Alarm_ctr_rst = 0;
-
-// use shift register to make sure reset is held high for 16 clock cycles to try to prevent glitches from resetting latch
-reg [RESET_SHR-1:0] hp_Alarm_ctr_rst_shr = 0;
-always @(posedge user_clock2)
-begin
-    hp_Alarm_ctr_rst_shr <= {hp_Alarm_ctr_rst_shr[RESET_SHR-2:0], hp_Alarm_ctr_rst | wb_hp_Alarm_ctr_rst | reset};
-end
-
-always @(posedge user_clock2)
-begin
-    if (&hp_Alarm_ctr_rst_shr)
-    begin
-        hp_Alarm_ctr <= 0;
-    end
-    else
-    begin
-        if (hp_Alarm_latch_sync)
-            hp_Alarm_ctr <= hp_Alarm_ctr + 1;
-    end  
-end
-
-// writes
+// handle wishbone writes
 always @(posedge wb_clk_i)
 begin
     if (reset)
     begin
         wb_hp_vcc           <= 0;
-        wb_hp_Alarm_rst     <= 0;
-        wb_hp_Alarm_ctr_rst <= 0;
+        wb_hp_alarm_rst     <= 0;
+        wb_hp_alarm_ctr_rst <= 0;
         wb_hp_glitch_en     <= 0;
         wb_hp_pn_select     <= 0;
     end
@@ -240,14 +330,14 @@ begin
              wbs_adr_i == BASE_ADDRESS)
     begin
         wb_hp_vcc           <= wbs_dat_i[0];
-        wb_hp_Alarm_rst     <= wbs_dat_i[1];
-        wb_hp_Alarm_ctr_rst <= wbs_dat_i[2];
+        wb_hp_alarm_rst     <= wbs_dat_i[1];
+        wb_hp_alarm_ctr_rst <= wbs_dat_i[2];
         wb_hp_glitch_en     <= wbs_dat_i[3];
         wb_hp_pn_select     <= wbs_dat_i[15:14];
     end
 end
 
-// reads
+// handle wishbone reads
 always @(posedge wb_clk_i)
 begin
     if (reset)
@@ -261,9 +351,9 @@ begin
         begin
             wbs_dat_o <= {16'h0,
                           wb_hp_pn_select,
-                          hp_Alarm_ctr, hp_Alarm_latch, hp_Alarm,
-                          wb_hp_glitch_en, wb_hp_Alarm_ctr_rst,
-                          wb_hp_Alarm_rst, wb_hp_vcc};
+                          hp_alarm_ctr, hp_alarm_latch, hp_alarm,
+                          wb_hp_glitch_en, wb_hp_alarm_ctr_rst,
+                          wb_hp_alarm_rst, wb_hp_vcc};
         end
         else
         begin
@@ -272,7 +362,7 @@ begin
     end
 end
 
-// acks
+// handle wishbone acks
 always @(posedge wb_clk_i)
 begin
     if (reset)
@@ -282,16 +372,26 @@ begin
         wbs_ack_o <= (wbs_stb_i && !wbs_stl_o && (wbs_adr_i == BASE_ADDRESS));
 end
 
+// some macros to help with setting GPIO
+`define SET_IO_OUTPUT(sig, pin) \
+    assign gpio_enb[pin] = {16{`IO_OUTPUT}}; \
+    assign gpio_o[pin] = sig
+`define SET_IO_INPUT(sig, pin) \
+    assign gpio_enb[pin] = {16{`IO_INPUT}}; \
+    assign sig = gpio_i[pin] 
+`define SET_IO_NA(pin) \
+    assign gpio_enb[pin] = {16{`IO_INPUT}}
+
 // gpio inputs
 `SET_IO_INPUT  (hp_vcc,           0);
-`SET_IO_INPUT  (hp_Alarm_rst,     1);
-`SET_IO_INPUT  (hp_Alarm_ctr_rst, 2);
+`SET_IO_INPUT  (hp_alarm_rst,     1);
+`SET_IO_INPUT  (hp_alarm_ctr_rst, 2);
 `SET_IO_INPUT  (hp_glitch_en,     3);
 `SET_IO_INPUT  (hp_pn_select,     15:14);
     
 // gpio outputs
-`SET_IO_OUTPUT (hp_Alarm,         4);
-`SET_IO_OUTPUT (hp_Alarm_latch,   5);
-`SET_IO_OUTPUT (hp_Alarm_ctr,     13:6);
+`SET_IO_OUTPUT (hp_alarm,         4);
+`SET_IO_OUTPUT (hp_alarm_latch,   5);
+`SET_IO_OUTPUT (hp_alarm_ctr,     13:6);
 
 endmodule

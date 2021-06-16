@@ -3,23 +3,25 @@
 module hp_mod #(
     parameter INVERT = 0	
 ) (
-    input  wire CK,
-    output reg  CK2 = 0,
-    input  wire VCC,
-    output reg Data = 0
+    input  wire ck,
+    output reg  ck2,
+    input  wire vcc,
+    input  wire reset,
+    output reg  data
 );
 
-// create CK2 to run at half CK speed so we can catch inverse phase glitches
-always @(posedge CK)
-    CK2 <= !CK2;
+always @(posedge ck)
+    if (reset)
+        ck2 <= 0;
+    else
+        ck2 <= !ck2;
 
-// create ring oscillator with data at CK2/2
-always @(posedge CK)
-    if (CK2 == INVERT) begin
-        if(VCC == 0)
-            #0.2 Data <= 0;
-        else
-            #0.2 Data <= ~Data;
+// create ring oscillator with data at f/2
+always @(posedge ck)
+    if (reset)
+        #0.2 data <= 0;
+    else if (ck2 == INVERT) begin
+        #0.2 data <= ~data;
     end
 
 endmodule
@@ -28,39 +30,35 @@ endmodule
 module hp_pd #(
     parameter INVERT = 0	
 ) (
-    input  wire CK,
-    input  wire CK2,
-    input  wire VCC,
-    input  wire Data,
-    output wire Alarm    
+    input  wire ck,
+    input  wire reset,
+    input  wire ck2,
+    input  wire data,
+    output wire alarm    
 );
 
 // create our A & B values for
 // alarm = !x * !y = !(Data ^ B) * !(B ^ A) 
-reg B = 0, A = 0;
+reg b, a;
 
-always @(posedge CK)
-    // use CK/CK2 to let us do posedge or negedge triggering
-    if (CK2 == INVERT)
-        // disable output if VCC is low
-        if(VCC == 0)
-            #0.1 B <= 0;
+always @(posedge ck)
+    if (ck2 == INVERT)
+        if (reset)
+            #0.1 b <= 0;
         else
-            #0.1 B <= Data;
+            #0.1 b <= data;
 
-always @(posedge CK)
-    // use CK/CK2 to let us do posedge or negedge triggering
-    if (CK2 != INVERT)
-        // disable output if VCC is low
-        if(VCC == 0)
-            #0.1 A <= 0;
+always @(posedge ck)
+    if (ck2 != INVERT)
+        if (reset)
+            #0.1 a <= 0;
         else
-            #0.1 A <= B;
+            #0.1 a <= b;
 
-wire Y, X;
-assign Y = Data ^ B;
-assign X = B ^ A;
-assign Alarm = (~X) & (~Y);
+wire y, x;
+assign y = data ^ b;
+assign x = b ^ a;
+assign alarm = (~x) & (~y);
 
 endmodule
 
@@ -68,36 +66,28 @@ endmodule
 module hoggephase #(
     parameter INVERT = 0	
 ) (
-    input  wire CK,
-    input  wire VCC,
-    output wire Alarm,
+    input  wire ck,
+    input  wire vcc,
+    output wire alarm,
     input  wire glitch
 );
 
-wire Data;
-wire CK2;
+wire data;
+wire ck2;
 hp_mod #(INVERT) hp_mod (
-    .CK(CK),
-    .CK2(CK2),
-    .VCC(VCC),
-    .Data(Data)
+    .ck(ck),
+    .ck2(ck2),
+    .reset(!vcc),
+    .vcc(vcc),
+    .data(data)
 );
 
-wire Alarm_w;
 hp_pd #(INVERT) hp_pd (
-    .CK(CK),
-    .CK2(CK2),
-    .VCC(VCC),
-    .Data(Data ^ glitch),
-    .Alarm(Alarm_w)
+    .ck(ck),
+    .ck2(ck2),
+    .reset(!vcc),
+    .data(data ^ glitch),
+    .alarm(alarm)
 );
-
-// delay VCC signal to enable Alarm output after phase detector has started up
-reg [2:0] VCC_ = 0;
-always @(posedge CK2)
-    VCC_ <= {VCC_[1:0], VCC};
-
-// only output Alarm when VCC is high
-assign Alarm = Alarm_w & VCC_[2] & VCC;
 
 endmodule
