@@ -207,6 +207,15 @@ end
 endmodule
 
 
+/*
+ * Caravel peripheral implementing wishbone & GPIO interface.
+ * Upper level wrapper should tie this into the LA or other
+ * buses if needed. 
+ *
+ * BASE_ADDRESS - Address of single 32-bit register on wishbone bus
+ * GLITCH_BIST  - Build in built-in self-test for glitch detection
+ * RESET_SHR    - Size of shift register to use for reset glitch protection
+ */
 module wb_hp #(
     parameter   [31:0]  BASE_ADDRESS = 32'h3000_0000,        // base address
     parameter           GLITCH_BIST  = 1,
@@ -222,27 +231,27 @@ module wb_hp #(
     inout  wire vssd1,	// User area 1 digital ground
     inout  wire vssd2,	// User area 2 digital ground
 `endif
-    input  wire          wb_clk_i,
-    input  wire          reset,
+    input  wire          wb_clk_i,        // wishbone clock
+    input  wire          reset,           // peripheral reset
 
-    input  wire          user_clock2,
+    input  wire          user_clock2,     // hoggephase actually clocked on this
 
     // wb interface
     input  wire          wbs_cyc_i,       // wishbone transaction
     input  wire          wbs_stb_i,       // strobe - data valid and accepted as long as !wbs_stall_o
     input  wire          wbs_we_i,        // write enable
-    input  wire [31:0]   wbs_adr_i,      // address
-    input  wire [31:0]   wbs_dat_i,      // incoming data
+    input  wire [31:0]   wbs_adr_i,       // address
+    input  wire [31:0]   wbs_dat_i,       // incoming data
     output reg           wbs_ack_o,       // request is completed 
-    output wire          wbs_stl_o,     // cannot accept req
-    output reg  [31:0]   wbs_dat_o,      // output data
+    output wire          wbs_stl_o,       // cannot accept req
+    output reg  [31:0]   wbs_dat_o,       // output data
 
     // buttons
     input  wire [15:0]   gpio_i,
     output wire [15:0]   gpio_enb,        // not enable - low for active
     output wire [15:0]   gpio_o,
     
-    output wire          glitch
+    output wire          glitch           // glitch output for simulation purposes
 );
 
 wire clk = user_clock2;
